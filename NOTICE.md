@@ -1,4 +1,4 @@
-# Scavenger Sense - Arrow Quarry - copyright and licence
+# Witcher Senses Edit for Scavenger Sense - copyright and licence
 
 Copyright (C) 2026 ApocryphaRealm
 
@@ -24,4 +24,4 @@ from its first version.
 
 Components under other licences, with their notices: `THIRD_PARTY_NOTICES.md`.
 
-Source code: https://github.com/ApocryphaRealm/ScavengerSenseArrowQuarry
+Source code: https://github.com/ApocryphaRealm/WitcherSensesEdit

@@ -1,8 +1,8 @@
 ﻿{
-  "name": "scavengersensearrowquarry-17",
+  "name": "witchersensesedit-17",
   "version-string": "1.0.0",
-  "description": "Scavenger Sense - Arrow Quarry. [Skyrim 1.7.x build line: CommonLibSSE-NG 7.2.0, cmake/ports-17]",
-  "homepage": "https://github.com/ApocryphaRealm/ScavengerSenseArrowQuarry",
+  "description": "Witcher Senses Edit for Scavenger Sense. [Skyrim 1.7.x build line: CommonLibSSE-NG 7.2.0, cmake/ports-17]",
+  "homepage": "https://github.com/ApocryphaRealm/WitcherSensesEdit",
   "license": "GPL-3.0-or-later",
   "dependencies": [
     "commonlibsse-ng",

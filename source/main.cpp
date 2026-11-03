@@ -1,4 +1,4 @@
-// Scavenger Sense - Arrow Quarry. Own code, GPL-3.0-or-later (2026-11-03).
+// Witcher Senses Edit for Scavenger Sense. Own code, GPL-3.0-or-later (2026-11-03).
 //
 // A patch for Scavenger Sense (Nexus 188380, GPL-3.0-or-later, by KShakes). The owner, verbatim: "a small patch mod for
 // Scavenger Sense that automates its button controls so that any target you hit with a bow, you automatically track
@@ -36,8 +36,8 @@
 
 namespace
 {
-	inline constexpr const char* kDisplayName = "Scavenger Sense - Arrow Quarry";
-	inline constexpr const char* kLogName = "ScavengerSenseArrowQuarry";
+	inline constexpr const char* kDisplayName = "Witcher Senses Edit for Scavenger Sense";
+	inline constexpr const char* kLogName = "WitcherSensesEdit";
 	inline constexpr const wchar_t* kTargetModule = L"ScavengerSense.dll";
 
 	// ---- Scavenger Sense 0.10.1 beta, Nexus file 820549, sha256 e658b9f1...6ba6f. Read by disassembly on 2026-11-03. ----
@@ -338,12 +338,12 @@ namespace
 			return;
 		}
 		constexpr const char* descriptor =
-			"{\"description\":\"Scavenger Sense - Arrow Quarry. Default: whether the patch recognised Scavenger Sense, and counts of "
+			"{\"description\":\"Witcher Senses Edit for Scavenger Sense. Default: whether the patch recognised Scavenger Sense, and counts of "
 			"bow hits, marks, releases and failures. op=mark or op=release with formId (hex string) queues the same path a player arrow or "
 			"a death takes for that actor.\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{\"op\":{\"type\":\"string\"},\"formId\":{\"type\":\"string\"}}},"
 			"\"readOnly\":false}";
-		registered = devBench->RegisterTool("arrowquarry.state", descriptor, &DevBenchHandler, nullptr);
+		registered = devBench->RegisterTool("witchersenses.state", descriptor, &DevBenchHandler, nullptr);
 	}
 
 	void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
@@ -379,7 +379,7 @@ namespace
 
 	spdlog::level::level_enum ConfiguredLogLevel()
 	{
-		const auto ini = std::filesystem::absolute("Data/SKSE/Plugins/ScavengerSenseArrowQuarry.ini");
+		const auto ini = std::filesystem::absolute("Data/SKSE/Plugins/WitcherSensesEdit.ini");
 		const UINT level = GetPrivateProfileIntW(L"Debug", L"uLogLevel", 2, ini.c_str());
 		return static_cast<spdlog::level::level_enum>(level <= 6 ? level : 2);
 	}
