@@ -6,8 +6,8 @@ Scavenger Sense set up as a hunter's sense: hold a button to see what is around 
 
 THE SENSE
 - Hold activate to sense. Tapping it, or double tapping it in a menu, does nothing extra.
-- Loot and containers light up with no name pop-ups. Containers are yellow. People are not highlighted.
-- Scavenger Sense's HUD extras and its chime are off.
+- Everything lights up with a strong glow and no name pop-ups: loot, small items, people and corpses. Containers are yellow, enemies red.
+- The screen keeps its colour while you sense, so the highlight colours show. Scavenger Sense's HUD extras and its chime are off.
 
 THE TRAIL
 - Land an arrow from your bow on someone and Scavenger Sense tracks them. When they die, it stops. Nothing to press.
