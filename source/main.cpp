@@ -258,6 +258,12 @@ namespace
 
 		RE::BSEventNotifyControl ProcessEvent(const RE::TESHitEvent* a_event, RE::BSTEventSource<RE::TESHitEvent>*) override
 		{
+			// Every hit the player lands, in the debug log: the report for "an arrow marked nothing" has to show what the game sent.
+			if (a_event && a_event->cause && a_event->cause->IsPlayerRef())
+			{
+				logger::debug("hit: target {:08X} source {:08X} projectile {:08X} flags {:X} -> {}", a_event->target ? a_event->target->GetFormID() : 0,
+					a_event->source, a_event->projectile, a_event->flags.underlying(), IsPlayerArrow(*a_event) ? "a bow arrow" : "not a bow arrow");
+			}
 			if (a_event && a_event->target && IsPlayerArrow(*a_event))
 			{
 				if (auto* actor = a_event->target->As<RE::Actor>(); actor && !actor->IsPlayerRef())
