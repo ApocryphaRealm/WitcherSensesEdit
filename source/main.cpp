@@ -291,8 +291,8 @@ namespace
 
 	bool IsPlayerArrow(const RE::TESHitEvent& a_event)
 	{
-		// The projectile is no test. A hit on an actor comes with the bow as source and projectile 0 (every actor in the
-		// 2026-11-03 log, a wolf among them); only a hit on a non-actor names the arrow. A bash is the one non-arrow hit that
+		// The projectile is no test. A hit on an actor comes with the bow as source and projectile 0 (the two actors shot in the
+		// 2026-11-03 log, an elk and a guard); only a hit on a non-actor names the arrow. A bash is the one non-arrow hit that
 		// has a bow as its source, and it says so in its flags.
 		if (!a_event.cause || !a_event.cause->IsPlayerRef()) { return false; }
 		// Scavenger Sense itself keeps Bow and Crossbow as two kinds, and the owner asked for a bow: a bolt does not count.
