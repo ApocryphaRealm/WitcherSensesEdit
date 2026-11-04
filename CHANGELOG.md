@@ -7,6 +7,7 @@
 - First version. An arrow from your bow that lands on someone makes Scavenger Sense 0.10.1 beta track them, through its own tracking function, and any tracked target that dies is released at once. A second arrow leaves the target tracked; crossbows, melee, spells and other people's arrows do not count. A setup file turns on Track several at once, and your own ScavengerSense.ini wins. Any other Scavenger Sense build leaves the patch off, with a line in its log.
 
 ### Changed
+- The tap and G send Scavenger Sense's own timed pulse, which fades by itself, instead of toggling a two minute sense.
 - A quick tap of the left trigger, or a press of G, turns the sense on and off, in place of holding activate. Holding the trigger or using it with another button does nothing here, so it stays free as a modifier. The tap's length is fTapSeconds in WitcherSensesEdit.ini.
 - Hold activate to turn the sense on and hold again to turn it off, staying on for up to 120 seconds, Scavenger Sense's limit. Footprints show whenever you crouch, with no button.
 - Renamed from Scavenger Sense - Arrow Quarry. Now also carries a settings file: hold activate to sense, containers yellow, no name pop-ups, no people highlighted, HUD extras and chime off, no hand keys for tracking.
