@@ -2,14 +2,15 @@ Witcher Senses Edit for Scavenger Sense
 =======================================
 Version 1.0.0
 
-Scavenger Sense set up as a hunter's sense: hold a button to see what is around you, crouch to read footprints, and shoot
+Scavenger Sense set up as a hunter's sense: tap a button to see what is around you, crouch to read footprints, and shoot
 something to follow it.
 
 THE SENSE
-- Hold activate to turn the sense on, hold it again to turn it off. Tapping it, or double tapping it in a menu, does nothing extra.
+- Tap the left trigger or press G to turn the sense on, the same again to turn it off.
+- Only a quick tap counts, under a quarter of a second with no other button touched, so the left trigger still works as a hold modifier for your other mods.
 - It stays on for up to two minutes, the longest Scavenger Sense allows, then closes by itself. Opening a menu closes it too.
 - What it lights is chosen when you turn it on: up to 127 objects in range at that moment. Things that load in later are not lit.
-- On a horse the hold does nothing, so hold to dismount works. A sense already on stays on when you mount.
+- On a horse the tap and G do nothing. A sense already on stays on when you mount.
 - Everything lights up with a strong glow and no name pop-ups: loot, small items, people and corpses. Containers are yellow, enemies red.
 - The screen keeps its colour while you sense, so the highlight colours show. Scavenger Sense's HUD extras and its chime are off.
 
@@ -32,7 +33,7 @@ Sense update it does nothing until it is updated too, and says so in its log. It
 
 WHAT IS IN THE PACKAGE
   SKSE\Plugins\WitcherSensesEdit.dll / .pdb                 the patch
-  SKSE\Plugins\WitcherSensesEdit.ini                        the log level, nothing else
+  SKSE\Plugins\WitcherSensesEdit.ini                        the tap's length and the log level
   SKSE\Plugins\ScavengerSense_setup\80-witcher-senses-edit.ini     the settings and controls above
 
 LOG

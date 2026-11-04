@@ -23,6 +23,10 @@
 // Scavenger Sense has no idea of a mount, and activate on a horse is also Better Third Person Selection's hold to dismount.
 // Sense::OnHotkey, the one place a sweep is asked for or faded, is hooked and does nothing while the player is on a mount.
 //
+// The owner's left trigger is also his hold modifier, and Scavenger Sense's press fires on the way down, so it cannot own that
+// button. Its own gamepad key is off and this plugin calls OnHotkey for a quick tap: down and up inside fTapSeconds, with no
+// other button touched in between. It runs from an input sink, the same place Scavenger Sense calls it from.
+//
 // The addresses belong to one build of one DLL, so they are checked before use: the PE timestamp, the image size and the
 // first bytes of each function. Anything else and this plugin stays off and says so in its log. It never guesses.
 #include "PCH.h"
@@ -86,6 +90,7 @@ namespace
 
 	// Rule 31: what the patch decided, for DevBench and the log. Everything is plain and cheap.
 	std::atomic<bool> g_ready{ false };
+	float g_tapSeconds = 0.25f;
 	std::atomic<std::uint32_t> g_bowHits{ 0 }, g_marked{ 0 }, g_alreadyMarked{ 0 }, g_deadAtMark{ 0 }, g_released{ 0 }, g_failed{ 0 }, g_perkRefused{ 0 }, g_mountRefused{ 0 };
 	std::atomic<RE::FormID> g_lastTarget{ 0 };
 	std::mutex g_statusLock;
@@ -97,7 +102,7 @@ namespace
 		g_status = std::move(a_text);
 	}
 
-	// On a mount, or part way on or off anything: the hold that dismounts can reach the sweep's hold time mid-dismount.
+	// On a mount, or part way on or off anything.
 	bool PlayerOnMount()
 	{
 		const auto* player = RE::PlayerCharacter::GetSingleton();
@@ -113,7 +118,7 @@ namespace
 		if (PlayerOnMount())
 		{
 			++g_mountRefused;
-			logger::debug("sweep: on a mount, the hold does nothing");
+			logger::debug("sweep: on a mount, the sense key does nothing");
 			return;
 		}
 		g_onHotkey(a_sense);
@@ -175,6 +180,54 @@ namespace
 		logger::info("mount gate: on");
 	}
 
+	// The left trigger as a quick tap. Any other button pressed while it is down, or still down when it goes down, makes it a modifier.
+	class TapSink final : public RE::BSTEventSink<RE::InputEvent*>
+	{
+	public:
+		static TapSink* GetSingleton()
+		{
+			static TapSink singleton;
+			return &singleton;
+		}
+
+		RE::BSEventNotifyControl ProcessEvent(RE::InputEvent* const* a_events, RE::BSTEventSource<RE::InputEvent*>*) override
+		{
+			if (!a_events) { return RE::BSEventNotifyControl::kContinue; }
+			for (auto* e = *a_events; e; e = e->next)
+			{
+				const auto* button = e->AsButtonEvent();
+				if (!button || button->GetDevice() != RE::INPUT_DEVICE::kGamepad) { continue; }
+				if (button->GetIDCode() != RE::BSWin32GamepadDevice::Key::kLeftTrigger)
+				{
+					if (button->IsPressed()) { _armed = false; }
+					continue;
+				}
+				if (button->IsDown())
+				{
+					_armed = GameplayHasInput();
+				}
+				else if (button->IsUp())
+				{
+					const bool tap = _armed && button->HeldDuration() <= g_tapSeconds && GameplayHasInput();
+					logger::debug("tap: left trigger up after {:.2f}s, {}", button->HeldDuration(), tap ? "a tap" : "not a tap");
+					_armed = false;
+					if (tap) { OnHotkeyHook(g_senseSingleton()); }
+				}
+			}
+			return RE::BSEventNotifyControl::kContinue;
+		}
+
+	private:
+		// Scavenger Sense's own gate on its key.
+		static bool GameplayHasInput()
+		{
+			auto* ui = RE::UI::GetSingleton();
+			return ui && !ui->GameIsPaused() && !ui->IsMenuOpen(RE::Console::MENU_NAME);
+		}
+
+		bool _armed = false;
+	};
+
 	// Checks everything before a single address is trusted. Scavenger Sense is a beta that updates; an update leaves this
 	// patch switched off with a line in the log rather than calling into the wrong code.
 	void BindScavengerSense()
@@ -211,6 +264,7 @@ namespace
 		g_markUnderAim = reinterpret_cast<MemberBoolFn>(base + kMarkUnderAim.rva);
 		g_perksSingleton = reinterpret_cast<GetSingletonFn>(base + kPerksGetSingleton.rva);
 		g_allowsTracking = reinterpret_cast<MemberBoolFn>(base + kAllowsTracking.rva);
+		g_onHotkey = reinterpret_cast<MemberVoidFn>(base + kOnHotkey.rva);
 		InstallMountGate(base);
 		g_ready.store(true);
 		SetStatus("on");
@@ -473,6 +527,12 @@ namespace
 					events->AddEventSink<RE::TESHitEvent>(Sinks::GetSingleton());
 					events->AddEventSink<RE::TESDeathEvent>(Sinks::GetSingleton());
 					logger::info("listening for hits and deaths");
+					auto* input = RE::BSInputDeviceManager::GetSingleton();
+					if (input && g_tapSeconds > 0.0f)
+					{
+						input->AddEventSink<RE::InputEvent*>(TapSink::GetSingleton());
+						logger::info("left trigger: a tap of up to {:.2f}s runs the sense", g_tapSeconds);
+					}
 				}
 				else
 				{
@@ -485,6 +545,14 @@ namespace
 		default:
 			break;
 		}
+	}
+
+	void LoadTapSeconds()
+	{
+		const auto ini = std::filesystem::absolute("Data/SKSE/Plugins/WitcherSensesEdit.ini");
+		wchar_t text[32]{};
+		GetPrivateProfileStringW(L"Sense", L"fTapSeconds", L"0.25", text, 32, ini.c_str());
+		g_tapSeconds = static_cast<float>(_wtof(text));
 	}
 
 	spdlog::level::level_enum ConfiguredLogLevel()
@@ -505,6 +573,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	SKSE::Init(a_skse);
 	const auto level = ConfiguredLogLevel();
 	SKSE::log::set_level(level, level);
+	LoadTapSeconds();
 	logger::info("{} {} loading", kDisplayName, SKSE::PluginDeclaration::GetSingleton()->GetVersion().string("."));
 	SKSE::GetMessagingInterface()->RegisterListener(MessageHandler);
 	return true;
