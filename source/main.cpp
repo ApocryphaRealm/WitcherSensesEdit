@@ -27,6 +27,10 @@
 // button. Its own gamepad key is off and this plugin calls OnHotkey for a quick tap: down and up inside fTapSeconds, with no
 // other button touched in between. It runs from an input sink, the same place Scavenger Sense calls it from.
 //
+// Scavenger Sense's marks and trails live in its process memory and neither of its load steps touches them, so a target
+// marked before a death was still marked in the save reloaded after it. Its wipe key's own function cannot be called for this:
+// it is behind TrailGateOpen and can show a toast. Its body is four calls, and this plugin makes the same four on a load or a new game.
+//
 // The addresses belong to one build of one DLL, so they are checked before use: the PE timestamp, the image size and the
 // first bytes of each function. Anything else and this plugin stays off and says so in its log. It never guesses.
 #include "PCH.h"
@@ -67,6 +71,12 @@ namespace
 	inline constexpr Known kPerksGetSingleton{ 0x689A0, { 0x48, 0x83, 0xEC, 0x28, 0x8B, 0x0D, 0xFE, 0xA7, 0x0D, 0x00, 0x65, 0x48, 0x8B, 0x04, 0x25, 0x58 }, "Perks::GetSingleton" };
 	inline constexpr Known kAllowsTracking{ 0x67A10, { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x59, 0x08, 0x48, 0x85, 0xDB, 0x74, 0x1F, 0xE8 }, "Perks::AllowsTracking" };
 	inline constexpr Known kOnHotkey{ 0x83A80, { 0x48, 0x89, 0x5C, 0x24, 0x20, 0x55, 0x56, 0x57, 0x48, 0x8B, 0xEC, 0x48, 0x81, 0xEC, 0x80, 0x00 }, "Sense::OnHotkey" };
+	// What Sense::OnTrailLongPress (+83EA0) calls once its gate has passed: _marked and _quarry share one clear, as both have
+	// 0x20 byte nodes, _trails has its own, then Labels::SetTrails({}, false). Its toast check comes after all four.
+	inline constexpr Known kClearSmallMap{ 0x8EEC0, { 0x40, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x51, 0x10, 0x48, 0x8B, 0xF9, 0x48, 0x85, 0xD2 }, "unordered_map clear (marks, windows)" };
+	inline constexpr Known kClearTrailMap{ 0x8EF80, { 0x40, 0x56, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xF1, 0x48, 0x8B, 0x49, 0x10, 0x48, 0x85, 0xC9 }, "unordered_map clear (trails)" };
+	inline constexpr Known kLabelsGetSingleton{ 0x4CB30, { 0x48, 0x83, 0xEC, 0x28, 0x8B, 0x0D, 0x6E, 0x66, 0x0F, 0x00, 0x65, 0x48, 0x8B, 0x04, 0x25, 0x58 }, "Labels::GetSingleton" };
+	inline constexpr Known kSetTrails{ 0x52BA0, { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x18, 0x48, 0x89, 0x74, 0x24, 0x20, 0x48 }, "Labels::SetTrails" };
 	// OnHotkey's first instruction, mov [rsp+20h], rbx, is exactly the five bytes the jump replaces.
 	inline constexpr std::size_t kOnHotkeyStolen = 5;
 
@@ -75,6 +85,11 @@ namespace
 	inline constexpr std::size_t kMarkedHead = 0x260;
 	inline constexpr std::size_t kMarkedSize = 0x268;
 	inline constexpr std::size_t kNodeKey = 0x10;
+	// The three maps' this pointers, as OnTrailLongPress passes them, and where a map keeps its size.
+	inline constexpr std::size_t kQuarryMap = 0x1D8;
+	inline constexpr std::size_t kTrailsMap = 0x218;
+	inline constexpr std::size_t kMarkedMap = 0x258;
+	inline constexpr std::size_t kMapSize = 0x10;
 	// CrosshairPickData::target, at +4 on every flat runtime: the offset MarkUnderAim itself reads.
 	inline constexpr std::size_t kPickTarget = 0x4;
 
@@ -87,11 +102,16 @@ namespace
 	MemberBoolFn g_allowsTracking = nullptr;
 	using MemberVoidFn = void (*)(void*);
 	MemberVoidFn g_onHotkey = nullptr;
+	MemberVoidFn g_clearSmallMap = nullptr;
+	MemberVoidFn g_clearTrailMap = nullptr;
+	GetSingletonFn g_labelsSingleton = nullptr;
+	using SetTrailsFn = void (*)(void*, void*, bool);
+	SetTrailsFn g_setTrails = nullptr;
 
 	// Rule 31: what the patch decided, for DevBench and the log. Everything is plain and cheap.
 	std::atomic<bool> g_ready{ false };
 	float g_tapSeconds = 0.25f;
-	std::atomic<std::uint32_t> g_bowHits{ 0 }, g_marked{ 0 }, g_alreadyMarked{ 0 }, g_deadAtMark{ 0 }, g_released{ 0 }, g_failed{ 0 }, g_perkRefused{ 0 }, g_mountRefused{ 0 };
+	std::atomic<std::uint32_t> g_bowHits{ 0 }, g_marked{ 0 }, g_alreadyMarked{ 0 }, g_deadAtMark{ 0 }, g_released{ 0 }, g_failed{ 0 }, g_perkRefused{ 0 }, g_mountRefused{ 0 }, g_loadWipes{ 0 };
 	std::atomic<RE::FormID> g_lastTarget{ 0 };
 	std::mutex g_statusLock;
 	std::string g_status = "not checked yet";
@@ -251,7 +271,7 @@ namespace
 						  "It does nothing until it is updated for that build.", stamp, size, kKnownTimestamp, kKnownImageSize);
 			return;
 		}
-		for (const Known* k : { &kSenseGetSingleton, &kMarkUnderAim, &kPerksGetSingleton, &kAllowsTracking, &kOnHotkey })
+		for (const Known* k : { &kSenseGetSingleton, &kMarkUnderAim, &kPerksGetSingleton, &kAllowsTracking, &kOnHotkey, &kClearSmallMap, &kClearTrailMap, &kLabelsGetSingleton, &kSetTrails })
 		{
 			if (std::memcmp(reinterpret_cast<const void*>(base + k->rva), k->head.data(), k->head.size()) != 0)
 			{
@@ -265,6 +285,10 @@ namespace
 		g_perksSingleton = reinterpret_cast<GetSingletonFn>(base + kPerksGetSingleton.rva);
 		g_allowsTracking = reinterpret_cast<MemberBoolFn>(base + kAllowsTracking.rva);
 		g_onHotkey = reinterpret_cast<MemberVoidFn>(base + kOnHotkey.rva);
+		g_clearSmallMap = reinterpret_cast<MemberVoidFn>(base + kClearSmallMap.rva);
+		g_clearTrailMap = reinterpret_cast<MemberVoidFn>(base + kClearTrailMap.rva);
+		g_labelsSingleton = reinterpret_cast<GetSingletonFn>(base + kLabelsGetSingleton.rva);
+		g_setTrails = reinterpret_cast<SetTrailsFn>(base + kSetTrails.rva);
 		InstallMountGate(base);
 		g_ready.store(true);
 		SetStatus("on");
@@ -375,6 +399,42 @@ namespace
 		}
 	}
 
+	// Every mark, trail and recording window gone, with Scavenger Sense's own code and heap. The maps hold plain handle numbers,
+	// names and points, so this reads no engine state and is safe however far through a load it runs.
+	void WipeNow()
+	{
+		if (!g_ready.load()) { return; }
+		auto* sense = static_cast<std::byte*>(g_senseSingleton());
+		const auto sizeOf = [sense](std::size_t a_map) { return *reinterpret_cast<std::size_t*>(sense + a_map + kMapSize); };
+		const auto marked = sizeOf(kMarkedMap);
+		const auto trails = sizeOf(kTrailsMap);
+		const auto windows = sizeOf(kQuarryMap);
+		g_clearSmallMap(sense + kMarkedMap);
+		g_clearTrailMap(sense + kTrailsMap);
+		g_clearSmallMap(sense + kQuarryMap);
+		// A vector by value: a pointer to the caller's temporary, which the callee moves from and destroys. All zeros is an
+		// empty vector, so its heap is never handed anything of ours.
+		std::array<void*, 3> noTrails{};
+		g_setTrails(g_labelsSingleton(), noTrails.data(), false);
+		++g_loadWipes;
+		if (sizeOf(kMarkedMap) || sizeOf(kTrailsMap) || sizeOf(kQuarryMap))
+		{
+			++g_failed;
+			logger::warn("wipe: something is left after the clear ({} marked, {} trails, {} windows)", sizeOf(kMarkedMap), sizeOf(kTrailsMap), sizeOf(kQuarryMap));
+			return;
+		}
+		logger::info("wipe: a load or a new game, gone: {} marked, {} trails, {} windows", marked, trails, windows);
+	}
+
+	// From the messaging listener onto the queue that every reader and writer of those maps runs on, so it cannot land inside
+	// one of them. The queue runs in order: a mark from a hit just before the load is already done when this clears it.
+	void QueueWipe(const char* a_why)
+	{
+		if (!g_ready.load()) { return; }
+		logger::debug("wipe: {}, queued", a_why);
+		if (auto* tasks = SKSE::GetTaskInterface()) { tasks->AddTask([]() { WipeNow(); }); }
+	}
+
 	void Queue(void (*a_fn)(RE::ActorHandle), RE::ActorHandle a_handle)
 	{
 		if (auto* tasks = SKSE::GetTaskInterface())
@@ -460,9 +520,9 @@ namespace
 		}
 		return std::format(
 			"{{\"ok\":true,\"mod\":\"{}\",\"ready\":{},\"status\":\"{}\",\"bowHits\":{},\"marked\":{},\"alreadyMarked\":{},\"deadAtMark\":{},"
-			"\"released\":{},\"perkRefused\":{},\"mountRefused\":{},\"failed\":{},\"lastTarget\":\"{:08X}\"}}",
+			"\"released\":{},\"perkRefused\":{},\"mountRefused\":{},\"loadWipes\":{},\"failed\":{},\"lastTarget\":\"{:08X}\"}}",
 			kDisplayName, g_ready.load() ? "true" : "false", status, g_bowHits.load(), g_marked.load(), g_alreadyMarked.load(), g_deadAtMark.load(),
-			g_released.load(), g_perkRefused.load(), g_mountRefused.load(), g_failed.load(), g_lastTarget.load());
+			g_released.load(), g_perkRefused.load(), g_mountRefused.load(), g_loadWipes.load(), g_failed.load(), g_lastTarget.load());
 	}
 
 	// Every effect shader playing in the world, whoever started it, written to the log: "this object is still glowing" needs to
@@ -528,7 +588,7 @@ namespace
 		}
 		constexpr const char* descriptor =
 			"{\"description\":\"Witcher Senses Edit for Scavenger Sense. Default: whether the patch recognised Scavenger Sense, and counts of "
-			"bow hits, marks, releases, holds refused on a mount and failures. op=mark or op=release with formId (hex string) queues the same path a player arrow or "
+			"bow hits, marks, releases, holds refused on a mount, wipes at a load and failures. op=mark or op=release with formId (hex string) queues the same path a player arrow or "
 			"a death takes for that actor. op=effects writes every effect shader playing in the world to the log.\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{\"op\":{\"type\":\"string\"},\"formId\":{\"type\":\"string\"}}},"
 			"\"readOnly\":false}";
@@ -566,6 +626,12 @@ namespace
 					logger::error("off: the game's event source holder is not available");
 				}
 			}
+			break;
+		case SKSE::MessagingInterface::kPreLoadGame:
+			QueueWipe("a save is loading");
+			break;
+		case SKSE::MessagingInterface::kNewGame:
+			QueueWipe("a new game");
 			break;
 		default:
 			break;

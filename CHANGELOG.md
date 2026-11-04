@@ -12,4 +12,5 @@
 - Hold activate to turn the sense on and hold again to turn it off, staying on for up to 120 seconds, Scavenger Sense's limit. Footprints show whenever you crouch, with no button.
 - Renamed from Scavenger Sense - Arrow Quarry. Now also carries a settings file: hold activate to sense, containers yellow, no name pop-ups, no people highlighted, HUD extras and chime off, no hand keys for tracking.
 ### Fixed
+- Loading a save or starting a new game now clears every tracked target and trail, with no message. They used to carry over, so after dying and reloading, targets marked before the death were still tracked. Going through a door is unchanged.
 - An arrow that lands on someone now tracks them. The game reports a hit on an actor with the bow but no projectile, and the check required a projectile, so only arrows hitting non-actors passed, and those are not actors to mark.

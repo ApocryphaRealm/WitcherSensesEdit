@@ -21,6 +21,7 @@ THE TRAIL
 - Everyone you hit stays tracked at once. A second arrow on the same target leaves them tracked.
 - Any tracked target that dies is released at once, whoever marked it and whoever killed it.
 - It works in any stance, and at any distance an arrow reaches. Tracked targets' trails stay visible when you stand up.
+- Loading a save or starting a new game clears every tracked target and trail, with no message. Going through a door does not.
 - Tracking has no key of its own here, so it takes no controller button.
 
 SETTINGS
