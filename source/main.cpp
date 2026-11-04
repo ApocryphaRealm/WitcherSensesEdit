@@ -16,6 +16,13 @@
 //     of one synchronous call and put back, and the mark list is READ first, so a mark only ever marks and a release
 //     only ever releases. All of Scavenger Sense's own work (colour, trail, toast, log) happens in its own code.
 //
+// Mark and release reach MarkUnderAim directly, so its callers' gates (TrailGateOpen, the reveal setting) do not apply. Its
+// crosshair path has no range check and no alive check, so an arrow that lands from any distance marks; the dead are
+// filtered here, and Tracks range only limits Scavenger Sense's own view pick, which this never reaches.
+//
+// Scavenger Sense has no idea of a mount, and activate on a horse is also Better Third Person Selection's hold to dismount.
+// Sense::OnHotkey, the one place a sweep is asked for or faded, is hooked and does nothing while the player is on a mount.
+//
 // The addresses belong to one build of one DLL, so they are checked before use: the PE timestamp, the image size and the
 // first bytes of each function. Anything else and this plugin stays off and says so in its log. It never guesses.
 #include "PCH.h"
@@ -55,6 +62,9 @@ namespace
 	inline constexpr Known kMarkUnderAim{ 0x827B0, { 0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x55, 0x57, 0x41, 0x56, 0x48, 0x8D }, "Sense::MarkUnderAim" };
 	inline constexpr Known kPerksGetSingleton{ 0x689A0, { 0x48, 0x83, 0xEC, 0x28, 0x8B, 0x0D, 0xFE, 0xA7, 0x0D, 0x00, 0x65, 0x48, 0x8B, 0x04, 0x25, 0x58 }, "Perks::GetSingleton" };
 	inline constexpr Known kAllowsTracking{ 0x67A10, { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x59, 0x08, 0x48, 0x85, 0xDB, 0x74, 0x1F, 0xE8 }, "Perks::AllowsTracking" };
+	inline constexpr Known kOnHotkey{ 0x83A80, { 0x48, 0x89, 0x5C, 0x24, 0x20, 0x55, 0x56, 0x57, 0x48, 0x8B, 0xEC, 0x48, 0x81, 0xEC, 0x80, 0x00 }, "Sense::OnHotkey" };
+	// OnHotkey's first instruction, mov [rsp+20h], rbx, is exactly the five bytes the jump replaces.
+	inline constexpr std::size_t kOnHotkeyStolen = 5;
 
 	// Sense::_marked, a std::unordered_map<FormID, Marked>: the list head is at +0x260, the size at +0x268 (read from
 	// the erase in MarkUnderAim's toggle). MSVC's list node is { next, prev, value }, so a node's key is at +0x10.
@@ -71,10 +81,12 @@ namespace
 	MemberBoolFn g_markUnderAim = nullptr;
 	GetSingletonFn g_perksSingleton = nullptr;
 	MemberBoolFn g_allowsTracking = nullptr;
+	using MemberVoidFn = void (*)(void*);
+	MemberVoidFn g_onHotkey = nullptr;
 
 	// Rule 31: what the patch decided, for DevBench and the log. Everything is plain and cheap.
 	std::atomic<bool> g_ready{ false };
-	std::atomic<std::uint32_t> g_bowHits{ 0 }, g_marked{ 0 }, g_alreadyMarked{ 0 }, g_deadAtMark{ 0 }, g_released{ 0 }, g_failed{ 0 }, g_perkRefused{ 0 };
+	std::atomic<std::uint32_t> g_bowHits{ 0 }, g_marked{ 0 }, g_alreadyMarked{ 0 }, g_deadAtMark{ 0 }, g_released{ 0 }, g_failed{ 0 }, g_perkRefused{ 0 }, g_mountRefused{ 0 };
 	std::atomic<RE::FormID> g_lastTarget{ 0 };
 	std::mutex g_statusLock;
 	std::string g_status = "not checked yet";
@@ -83,6 +95,44 @@ namespace
 	{
 		std::scoped_lock l(g_statusLock);
 		g_status = std::move(a_text);
+	}
+
+	// On a mount, or part way on or off anything: the hold that dismounts can reach the sweep's hold time mid-dismount.
+	bool PlayerOnMount()
+	{
+		const auto* player = RE::PlayerCharacter::GetSingleton();
+		if (!player) { return false; }
+		if (player->IsOnMount()) { return true; }
+		const auto state = player->AsActorState()->GetSitSleepState();
+		return state == RE::SIT_SLEEP_STATE::kWantToSit || state == RE::SIT_SLEEP_STATE::kWaitingForSitAnim || state == RE::SIT_SLEEP_STATE::kWantToStand;
+	}
+
+	// In front of Sense::OnHotkey. A sense already on stays on: the fade is behind this too.
+	void OnHotkeyHook(void* a_sense)
+	{
+		if (PlayerOnMount())
+		{
+			++g_mountRefused;
+			logger::debug("sweep: on a mount, the hold does nothing");
+			return;
+		}
+		g_onHotkey(a_sense);
+	}
+
+	// A jump at OnHotkey's entry, and a stub near the DLL that runs the replaced instruction and jumps back.
+	void InstallMountGate(std::uintptr_t a_base)
+	{
+		static SKSE::Trampoline trampoline{ "WitcherSensesEdit mount gate" };
+		trampoline.create(64, reinterpret_cast<void*>(a_base));
+		const std::uintptr_t entry = a_base + kOnHotkey.rva;
+		auto* stub = static_cast<std::uint8_t*>(trampoline.allocate(kOnHotkeyStolen + 14));
+		std::memcpy(stub, reinterpret_cast<const void*>(entry), kOnHotkeyStolen);
+		const std::uint8_t farJump[6]{ 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00 };  // jmp [rip+0]
+		const std::uintptr_t resume = entry + kOnHotkeyStolen;
+		std::memcpy(stub + kOnHotkeyStolen, farJump, sizeof(farJump));
+		std::memcpy(stub + kOnHotkeyStolen + sizeof(farJump), &resume, sizeof(resume));
+		g_onHotkey = reinterpret_cast<MemberVoidFn>(stub);
+		trampoline.write_branch<5>(entry, &OnHotkeyHook);
 	}
 
 	// Checks everything before a single address is trusted. Scavenger Sense is a beta that updates; an update leaves this
@@ -108,7 +158,7 @@ namespace
 						  "It does nothing until it is updated for that build.", stamp, size, kKnownTimestamp, kKnownImageSize);
 			return;
 		}
-		for (const Known* k : { &kSenseGetSingleton, &kMarkUnderAim, &kPerksGetSingleton, &kAllowsTracking })
+		for (const Known* k : { &kSenseGetSingleton, &kMarkUnderAim, &kPerksGetSingleton, &kAllowsTracking, &kOnHotkey })
 		{
 			if (std::memcmp(reinterpret_cast<const void*>(base + k->rva), k->head.data(), k->head.size()) != 0)
 			{
@@ -121,9 +171,10 @@ namespace
 		g_markUnderAim = reinterpret_cast<MemberBoolFn>(base + kMarkUnderAim.rva);
 		g_perksSingleton = reinterpret_cast<GetSingletonFn>(base + kPerksGetSingleton.rva);
 		g_allowsTracking = reinterpret_cast<MemberBoolFn>(base + kAllowsTracking.rva);
+		InstallMountGate(base);
 		g_ready.store(true);
 		SetStatus("on");
-		logger::info("on: Scavenger Sense 0.10.1 beta recognised (timestamp {:08X}); arrows you land now mark their target", stamp);
+		logger::info("on: Scavenger Sense 0.10.1 beta recognised (timestamp {:08X}); arrows you land now mark their target, and no sweep on a mount", stamp);
 	}
 
 	// Reads the mark list. Only ever called on the task queue Scavenger Sense itself polls on, so it cannot be mid-change.
@@ -240,7 +291,10 @@ namespace
 
 	bool IsPlayerArrow(const RE::TESHitEvent& a_event)
 	{
-		if (!a_event.cause || !a_event.cause->IsPlayerRef() || a_event.projectile == 0) { return false; }
+		// The projectile is no test. A hit on an actor comes with the bow as source and projectile 0 (every actor in the
+		// 2026-11-03 log, a wolf among them); only a hit on a non-actor names the arrow. A bash is the one non-arrow hit that
+		// has a bow as its source, and it says so in its flags.
+		if (!a_event.cause || !a_event.cause->IsPlayerRef()) { return false; }
 		// Scavenger Sense itself keeps Bow and Crossbow as two kinds, and the owner asked for a bow: a bolt does not count.
 		if (a_event.flags.any(RE::TESHitEvent::Flag::kBashAttack)) { return false; }
 		const auto* weapon = RE::TESForm::LookupByID<RE::TESObjectWEAP>(a_event.source);
@@ -266,7 +320,17 @@ namespace
 			}
 			if (a_event && a_event->target && IsPlayerArrow(*a_event))
 			{
-				if (auto* actor = a_event->target->As<RE::Actor>(); actor && !actor->IsPlayerRef())
+				auto* actor = a_event->target->As<RE::Actor>();
+				if (!actor)
+				{
+					// Not only walls: another mod's dynamic references report a hit every frame while an arrow is in them.
+					const auto* base = a_event->target->GetBaseObject();
+					const auto* file = base ? base->GetFile(0) : nullptr;
+					logger::debug("skip: target {:08X} is a {}, not an actor (base {:08X} {} from {})", a_event->target->GetFormID(),
+						RE::FormTypeToString(a_event->target->GetFormType()), base ? base->GetFormID() : 0,
+						base ? RE::FormTypeToString(base->GetFormType()) : "none"sv, file ? file->GetFilename() : "no file"sv);
+				}
+				else if (!actor->IsPlayerRef())
 				{
 					++g_bowHits;
 					Queue(MarkNow, actor->CreateRefHandle());
@@ -302,9 +366,9 @@ namespace
 		}
 		return std::format(
 			"{{\"ok\":true,\"mod\":\"{}\",\"ready\":{},\"status\":\"{}\",\"bowHits\":{},\"marked\":{},\"alreadyMarked\":{},\"deadAtMark\":{},"
-			"\"released\":{},\"perkRefused\":{},\"failed\":{},\"lastTarget\":\"{:08X}\"}}",
+			"\"released\":{},\"perkRefused\":{},\"mountRefused\":{},\"failed\":{},\"lastTarget\":\"{:08X}\"}}",
 			kDisplayName, g_ready.load() ? "true" : "false", status, g_bowHits.load(), g_marked.load(), g_alreadyMarked.load(), g_deadAtMark.load(),
-			g_released.load(), g_perkRefused.load(), g_failed.load(), g_lastTarget.load());
+			g_released.load(), g_perkRefused.load(), g_mountRefused.load(), g_failed.load(), g_lastTarget.load());
 	}
 
 	// op=mark/release with formId drive the same two paths a real hit and a real death take. Without an op: the state.
@@ -345,7 +409,7 @@ namespace
 		}
 		constexpr const char* descriptor =
 			"{\"description\":\"Witcher Senses Edit for Scavenger Sense. Default: whether the patch recognised Scavenger Sense, and counts of "
-			"bow hits, marks, releases and failures. op=mark or op=release with formId (hex string) queues the same path a player arrow or "
+			"bow hits, marks, releases, holds refused on a mount and failures. op=mark or op=release with formId (hex string) queues the same path a player arrow or "
 			"a death takes for that actor.\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{\"op\":{\"type\":\"string\"},\"formId\":{\"type\":\"string\"}}},"
 			"\"readOnly\":false}";

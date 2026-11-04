@@ -2,19 +2,25 @@ Witcher Senses Edit for Scavenger Sense
 =======================================
 Version 1.0.0
 
-Scavenger Sense set up as a hunter's sense: hold a button to see what is around you, and shoot something to follow it.
+Scavenger Sense set up as a hunter's sense: hold a button to see what is around you, crouch to read footprints, and shoot
+something to follow it.
 
 THE SENSE
-- Hold activate to sense. Tapping it, or double tapping it in a menu, does nothing extra.
+- Hold activate to turn the sense on, hold it again to turn it off. Tapping it, or double tapping it in a menu, does nothing extra.
+- It stays on for up to two minutes, the longest Scavenger Sense allows, then closes by itself. Opening a menu closes it too.
+- What it lights is chosen when you turn it on: up to 127 objects in range at that moment. Things that load in later are not lit.
+- On a horse the hold does nothing, so hold to dismount works. A sense already on stays on when you mount.
 - Everything lights up with a strong glow and no name pop-ups: loot, small items, people and corpses. Containers are yellow, enemies red.
 - The screen keeps its colour while you sense, so the highlight colours show. Scavenger Sense's HUD extras and its chime are off.
 
 THE TRAIL
+- Crouch and the footprints around you show, with no button.
 - Land an arrow from your bow on someone and Scavenger Sense tracks them. When they die, it stops. Nothing to press.
 - Any arrow you shoot from a bow, bound bows included. Crossbows, melee, spells and other people's arrows do not count.
 - Everyone you hit stays tracked at once. A second arrow on the same target leaves them tracked.
 - Any tracked target that dies is released at once, whoever marked it and whoever killed it.
-- It works in any stance. Tracking has no key of its own here, so it takes no controller button.
+- It works in any stance, and at any distance an arrow reaches. Tracked targets' trails stay visible when you stand up.
+- Tracking has no key of its own here, so it takes no controller button.
 
 SETTINGS
 All of this is one small settings file. Your own ScavengerSense.ini overrides it key by key, so anything you save from
