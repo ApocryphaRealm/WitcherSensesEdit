@@ -119,20 +119,60 @@ namespace
 		g_onHotkey(a_sense);
 	}
 
-	// A jump at OnHotkey's entry, and a stub near the DLL that runs the replaced instruction and jumps back.
+	// A free page within a rel32 jump of a_target, searched outward from it. Null when there is none.
+	std::uint8_t* AllocateNear(std::uintptr_t a_target, std::size_t a_size)
+	{
+		constexpr std::uintptr_t kStep = 0x10000;
+		constexpr std::uintptr_t kReach = 0x70000000;
+		const std::uintptr_t origin = a_target & ~(kStep - 1);
+		for (std::uintptr_t offset = kStep; offset < kReach; offset += kStep)
+		{
+			for (const std::uintptr_t address : { origin + offset, origin - offset })
+			{
+				MEMORY_BASIC_INFORMATION info{};
+				if (!VirtualQuery(reinterpret_cast<void*>(address), &info, sizeof(info)) || info.State != MEM_FREE || info.RegionSize < a_size) { continue; }
+				if (void* page = VirtualAlloc(reinterpret_cast<void*>(address), a_size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE)) { return static_cast<std::uint8_t*>(page); }
+			}
+		}
+		return nullptr;
+	}
+
+	// A jump at OnHotkey's entry to a page near Scavenger Sense's DLL: one far jump to the hook, then the replaced instruction
+	// and a far jump back. Our DLL and SKSE's trampoline can be over 2 GB from it, which is why neither can be the jump's target
+	// (2026-11-03: SKSE::Trampoline's write_branch stopped the game at load with "displacement is out of range"). No page: no gate.
 	void InstallMountGate(std::uintptr_t a_base)
 	{
-		static SKSE::Trampoline trampoline{ "WitcherSensesEdit mount gate" };
-		trampoline.create(64, reinterpret_cast<void*>(a_base));
 		const std::uintptr_t entry = a_base + kOnHotkey.rva;
-		auto* stub = static_cast<std::uint8_t*>(trampoline.allocate(kOnHotkeyStolen + 14));
-		std::memcpy(stub, reinterpret_cast<const void*>(entry), kOnHotkeyStolen);
+		auto* page = AllocateNear(entry, 0x1000);
+		if (!page)
+		{
+			logger::warn("mount gate: no free memory near Scavenger Sense; a hold on a horse will still run the sense");
+			return;
+		}
 		const std::uint8_t farJump[6]{ 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00 };  // jmp [rip+0]
-		const std::uintptr_t resume = entry + kOnHotkeyStolen;
-		std::memcpy(stub + kOnHotkeyStolen, farJump, sizeof(farJump));
-		std::memcpy(stub + kOnHotkeyStolen + sizeof(farJump), &resume, sizeof(resume));
+		const auto writeFarJump = [&farJump](std::uint8_t* a_at, std::uintptr_t a_to) {
+			std::memcpy(a_at, farJump, sizeof(farJump));
+			std::memcpy(a_at + sizeof(farJump), &a_to, sizeof(a_to));
+		};
+		writeFarJump(page, reinterpret_cast<std::uintptr_t>(&OnHotkeyHook));
+		auto* stub = page + 14;
+		std::memcpy(stub, reinterpret_cast<const void*>(entry), kOnHotkeyStolen);
+		writeFarJump(stub + kOnHotkeyStolen, entry + kOnHotkeyStolen);
 		g_onHotkey = reinterpret_cast<MemberVoidFn>(stub);
-		trampoline.write_branch<5>(entry, &OnHotkeyHook);
+		FlushInstructionCache(GetCurrentProcess(), page, 0x1000);
+		std::uint8_t jump[5]{ 0xE9 };
+		const auto disp = static_cast<std::int32_t>(reinterpret_cast<std::intptr_t>(page) - static_cast<std::intptr_t>(entry + sizeof(jump)));
+		std::memcpy(jump + 1, &disp, sizeof(disp));
+		DWORD old = 0;
+		if (!VirtualProtect(reinterpret_cast<void*>(entry), sizeof(jump), PAGE_EXECUTE_READWRITE, &old))
+		{
+			logger::warn("mount gate: could not write the jump; a hold on a horse will still run the sense");
+			return;
+		}
+		std::memcpy(reinterpret_cast<void*>(entry), jump, sizeof(jump));
+		VirtualProtect(reinterpret_cast<void*>(entry), sizeof(jump), old, &old);
+		FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(entry), sizeof(jump));
+		logger::info("mount gate: on");
 	}
 
 	// Checks everything before a single address is trusted. Scavenger Sense is a beta that updates; an update leaves this
