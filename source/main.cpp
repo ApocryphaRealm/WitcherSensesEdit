@@ -465,10 +465,35 @@ namespace
 			g_released.load(), g_perkRefused.load(), g_mountRefused.load(), g_failed.load(), g_lastTarget.load());
 	}
 
-	// op=mark/release with formId drive the same two paths a real hit and a real death take. Without an op: the state.
+	// Every effect shader playing in the world, whoever started it, written to the log: "this object is still glowing" needs to
+	// show whether the effect is alive, finished but not gone, or nothing to do with Scavenger Sense. Scavenger Sense's own pool
+	// of shaders all come from ScavengerSense.esp, so the file name says whose it is.
+	void LogEffects()
+	{
+		auto* lists = RE::ProcessLists::GetSingleton();
+		if (!lists) { return; }
+		std::uint32_t count = 0;
+		lists->ForEachShaderEffect([&count](RE::ShaderReferenceEffect* a_effect) {
+			if (!a_effect) { return RE::BSContainer::ForEachResult::kContinue; }
+			++count;
+			const auto target = a_effect->target.get();
+			const auto* shader = a_effect->effectData;
+			const auto* file = shader ? shader->GetFile(0) : nullptr;
+			logger::info("effect: {:08X} on {:08X} ({}) from {}: age {:.1f} of {:.1f}, finished {}", shader ? shader->GetFormID() : 0, target ? target->GetFormID() : 0,
+				target ? target->GetName() : "gone", file ? file->GetFilename() : "no file"sv, a_effect->age, a_effect->lifetime, a_effect->finished);
+			return RE::BSContainer::ForEachResult::kContinue;
+		});
+		logger::info("effect: {} playing", count);
+	}
+
+	// op=mark/release with formId drive the same two paths a real hit and a real death take. op=effects logs every effect shader. Without an op: the state.
 	void DevBenchHandler(void*, const char* a_argsJson, void* a_sink, DevBenchAPI::WriteFn a_write)
 	{
 		const std::string args = a_argsJson ? a_argsJson : "";
+		if (args.find("\"effects\"") != std::string::npos)
+		{
+			if (auto* tasks = SKSE::GetTaskInterface()) { tasks->AddTask([]() { LogEffects(); }); }
+		}
 		const bool mark = args.find("\"mark\"") != std::string::npos;
 		const bool release = args.find("\"release\"") != std::string::npos;
 		if (mark || release)
@@ -504,7 +529,7 @@ namespace
 		constexpr const char* descriptor =
 			"{\"description\":\"Witcher Senses Edit for Scavenger Sense. Default: whether the patch recognised Scavenger Sense, and counts of "
 			"bow hits, marks, releases, holds refused on a mount and failures. op=mark or op=release with formId (hex string) queues the same path a player arrow or "
-			"a death takes for that actor.\","
+			"a death takes for that actor. op=effects writes every effect shader playing in the world to the log.\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{\"op\":{\"type\":\"string\"},\"formId\":{\"type\":\"string\"}}},"
 			"\"readOnly\":false}";
 		registered = devBench->RegisterTool("witchersenses.state", descriptor, &DevBenchHandler, nullptr);
